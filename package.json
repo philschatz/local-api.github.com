@@ -1,0 +1,17 @@
+{
+  "name": "octokit-test",
+  "version": "0.0.1",
+  "description": "Webserver that simulates api.github.com",
+  "scripts": {
+  },
+  "dependencies": {
+    "coffee-script": "~1.6.3",
+    "express": "~3.3.8",
+    "underscore": "~1.5.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/philschatz/octokit-test.git"
+  },
+  "author": "Philip Schatz"
+}
