@@ -94,17 +94,22 @@ module.exports = exports = (argv) ->
     # Smallest Federated Wiki. Most routes use literal names,
     # or regexes to match, and then access req.params directly.
 
-    ##### Get routes #####
-    app.all '/zen', cors, (req, res) -> res.send('Server is up!')
+    # Enable CORS for all routes
+    app.all '*', cors
 
-    app.all '/user', cors, (req, res) ->
+    ##### Get routes #####
+    app.get '/zen', (req, res) -> res.send('Server is up!')
+
+    app.get '/user', (req, res) ->
       res.send {login: 'TEST_USER'}
 
-    app.all '/repos/:repoUser/:repoName/collaborators/:userId', cors, (req, res) ->
+    app.get '/repos/:repoUser/:repoName/collaborators/:userId', (req, res) ->
       res.status(204).send()
 
+    app.get '/repos/:repoUser/:repoName', (req, res) ->
+      res.send({master_branch: 'master'})
 
-    app.all '/repos/:repoUser/:repoName/git/trees/:repoBranch', cors, (req, res) ->
+    app.get '/repos/:repoUser/:repoName/git/trees/:repoBranch', (req, res) ->
 
       #repo.getBranch 'master', (error, branch) ->
       repo.getMaster (error, branch) ->
@@ -136,7 +141,7 @@ module.exports = exports = (argv) ->
           walker.start()
 
 
-    app.all '/repos/:repoUser/:repoName/git/blobs/:blobSha', cors, (req, res) ->
+    app.get '/repos/:repoUser/:repoName/git/blobs/:blobSha', (req, res) ->
       # Assume 'application/vnd.github.raw' is passed in (so respond with raw data)
       oid = Git.Oid.fromString(req.params.blobSha)
 
@@ -152,7 +157,7 @@ module.exports = exports = (argv) ->
         # }
 
 
-    app.all '/repos/:repoUser/:repoName/commits', cors, (req, res) ->
+    app.get '/repos/:repoUser/:repoName/commits', (req, res) ->
       sha = req.query.sha
 
       res.send([]) # TODO: Figure out how to list the most recent commits in a repo
@@ -219,7 +224,7 @@ module.exports = exports = (argv) ->
     # ###### Json Routes ######
     # # Handle fetching local and remote json pages.
     # # Local pages are handled by the pagehandler module.
-    # app.get ///^/([a-z0-9-]+)\.json$///, cors, (req, res) ->
+    # app.get ///^/([a-z0-9-]+)\.json$///, (req, res) ->
     #   file = req.params[0]
     #   pagehandler.get file, (e, page, status) ->
     #     if e then return res.e e
@@ -243,17 +248,17 @@ module.exports = exports = (argv) ->
 
     # ###### Meta Routes ######
     # # Send an array of pages in the database via json
-    # app.get '/system/slugs.json', cors, (req, res) ->
+    # app.get '/system/slugs.json', (req, res) ->
     #   fs.readdir argv.db, (e, files) ->
     #     if e then return res.e e
     #     res.send(files)
 
-    # app.get '/system/plugins.json', cors, (req, res) ->
+    # app.get '/system/plugins.json', (req, res) ->
     #   fs.readdir path.join(argv.c, 'plugins'), (e, files) ->
     #     if e then return res.e e
     #     res.send(files)
 
-    # app.get '/system/sitemap.json', cors, (req, res) ->
+    # app.get '/system/sitemap.json', (req, res) ->
     #   pagehandler.pages (e, sitemap) ->
     #     return res.e(e) if e
     #     res.json(sitemap)
