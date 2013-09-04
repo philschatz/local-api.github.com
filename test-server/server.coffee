@@ -18,6 +18,10 @@ Git = require 'nodegit'
 REPO_PATH = path.resolve(__dirname, '../.git')
 
 
+FILEMODE_LOOKUP =
+  '100644': 33188
+
+
 # Set export objects for node and coffee to a function that generates a server.
 module.exports = exports = (argv) ->
 
@@ -54,6 +58,7 @@ module.exports = exports = (argv) ->
   cors = (req, res, next) ->
     res.header('Access-Control-Allow-Origin', '*')
     res.header('Access-Control-Allow-Headers', 'If-Modified-Since, Authorization, Content-Type')
+    res.header('Access-Control-Allow-Methods', 'GET, PUT, POST, PATCH, DELETE')
     next()
 
 
@@ -87,7 +92,7 @@ module.exports = exports = (argv) ->
   Git.Repo.open REPO_PATH, (error, repo) ->
 
     console.log(error)
-    throw error if error
+    (res.status(403, error); return) if error
 
     #### Routes ####
     # Routes currently make up the bulk of the Express port of
@@ -113,10 +118,10 @@ module.exports = exports = (argv) ->
 
       #repo.getBranch 'master', (error, branch) ->
       repo.getMaster (error, branch) ->
-        throw error if error
+        (res.status(403, error); return) if error
 
         branch.getTree (error, tree) ->
-          throw error if error
+          (res.status(403, error); return) if error
 
           entries = []
           # Always return recursive (by walking the tree)
@@ -129,7 +134,7 @@ module.exports = exports = (argv) ->
                 type: 'blob' # File
                 path: entry.path()
                 sha: entry.oid().sha()
-                #mode: entry.filemode()
+                mode: entry.filemode()
 
           walker.on 'end', () ->
             res.send {
@@ -146,7 +151,7 @@ module.exports = exports = (argv) ->
       oid = Git.Oid.fromString(req.params.blobSha)
 
       repo.getBlob oid, (error, blob) ->
-        throw error if error
+        (res.status(403, error); return) if error
 
         res.send(blob.content())
         # res.send {
@@ -161,6 +166,116 @@ module.exports = exports = (argv) ->
       sha = req.query.sha
 
       res.send([]) # TODO: Figure out how to list the most recent commits in a repo
+
+    app.get '/repos/:repoUser/:repoName/git/refs/:headsOrTags/:refName', (req, res) ->
+      refName = 'refs/heads/master' # "refs/#{req.params.headsOrTags}/#{req.params.repoBranch}"
+
+      repo.getReference refName, (error, reference) ->
+        (res.status(403, error); return) if error
+
+        res.send
+          ref: refName
+          object:
+            sha: reference.target().sha()
+            type: 'branch'
+
+
+    app.post '/repos/:repoUser/:repoName/git/blobs', (req, res) ->
+      # JSON body is of the form:
+      #
+      #    { content: '...', encoding: 'utf-8' or 'base64' }
+      #
+      body = req.body
+
+      buffer = new Buffer(body.content, body.encoding)
+      repo.createBlobFromBuffer buffer, (err, oid) ->
+        (res.status(403, error); return) if error
+        res.send {sha: oid.sha()}
+
+
+    app.post '/repos/:repoUser/:repoName/git/trees', (req, res) ->
+      body = req.body
+
+      (res.status(403, 'ERROR: For now, sha is required'); return) if not body.base_tree
+      baseOid = Git.Oid.fromString(body.base_tree)
+
+      repo.getCommit baseOid, (error, commit) -> # TODO: should be smart if a commit is passed in as base_tree
+        (res.status(403, error); return) if error
+
+        repo.getTree commit.treeId(), (error, tree) ->
+          (res.status(403, error); return) if error
+
+          # Build a tree based on base_tree
+          builder = tree.builder()
+
+          for entry in body.tree
+            oid = Git.Oid.fromString(entry.sha)
+            builder.insert(entry.path, oid, FILEMODE_LOOKUP[entry.mode])
+
+          builder.write (error, oid) ->
+            (res.status(403, error); return) if error
+            res.send {sha:oid.sha()}
+
+    app.post '/repos/:repoUser/:repoName/git/commits', (req, res) ->
+      body = req.body
+
+      makeSignature = (obj) ->
+        name = obj?.name or 'DUMMY_NAME'
+        email = obj?.email or 'DUMMY_EMAIL'
+        if obj?.date
+          time = new Date(obj.date)
+        else
+          time = new Date()
+        time = time.getTime() / 1000 # Convert to seconds
+        time = parseInt(time)
+        offset = 0
+        return Git.Signature.create(name, email, time, offset)
+
+      updateRef = null
+      author = makeSignature(body.author)
+      committer = makeSignature(body.committer)
+      messageEncoding = 'utf-8'
+      message = body.message
+      tree = Git.Oid.fromString(body.tree)
+      # Assume at most 1 parent
+      (res.status(403, 'ERROR: Exactly 1 parent assumed'); return) if !body.parents or body.parents.length != 1
+
+      parentSha = body.parents[0]
+      parentOid = Git.Oid.fromString(parentSha)
+
+      repo.getCommit parentOid, (error, parentCommit) ->
+        (res.status(403, error); return) if error
+
+        # Assume 1 parent. Otherwise we need to look up all of them
+        parents = [parentCommit]
+
+        repo.createCommit updateRef, author, committer, message, tree, parents, (error, oid) ->
+          (res.status(403, error); return) if error
+
+          res.send {sha:oid.sha()}
+
+
+    app.patch '/repos/:repoUser/:repoName/git/refs/:headsOrTags/:refName', (req, res) ->
+      sha = req.body.sha
+      oid = Git.Oid.fromString(sha)
+
+      refName = 'refs/heads/master' # "refs/#{req.params.headsOrTags}/#{req.params.refName}"
+
+
+      repo.getCommit oid, (error, commit) ->
+        (res.status(403, error); return) if error
+
+        newRef = repo.createReference refName, oid, 1
+
+        if newRef
+          res.send
+            ref: refName
+            object:
+              type: commit
+              sha: commit.oid().sha()
+        else
+          (res.status(403, 'ERROR: Could not change ref'); return)
+
 
 
     # app.get ///^((/[a-zA-Z0-9:.-]+/[a-z0-9-]+(_rev\d+)?)+)/?$///, (req, res) ->
